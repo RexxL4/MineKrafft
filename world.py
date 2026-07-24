@@ -27,6 +27,7 @@ class World:
         self.noise = OpenSimplex(seed)
         self.chunks = {}
         self.modified_blocks = {}
+        self.player_position = None
         self.load_queue = deque()
         self.loading_chunks = set()
         self.load_world()
@@ -107,17 +108,21 @@ class World:
         cz = z // CHUNK_SIZE
         if (cx, cz) not in self.chunks:
             self.generate_chunk(cx, cz)
+        if not (0 <= y < WORLD_HEIGHT):
+            return
+
         lx = x % CHUNK_SIZE
         lz = z % CHUNK_SIZE
-        if 0 <= y < WORLD_HEIGHT:
-            if (cx, cz) not in self.modified_blocks:
-                self.modified_blocks[(cx, cz)] = {}
-            self.modified_blocks[(cx, cz)][(lx, y, lz)] = block_type
-            if block_type == AIR:
-                self.chunks[cx, cz].pop((lx, y, lz), None)
-            else:
-                self.chunks[cx, cz][(lx, y, lz)] = block_type
-            self.save_world()
+        old_block = self.chunks[cx, cz].get((lx, y, lz), AIR)
+        if old_block == block_type:
+            return
+
+        self.modified_blocks.setdefault((cx, cz), {})[(lx, y, lz)] = block_type
+        if block_type == AIR:
+            self.chunks[cx, cz].pop((lx, y, lz), None)
+        else:
+            self.chunks[cx, cz][(lx, y, lz)] = block_type
+        self.save_world()
 
     def schedule_chunk(self, cx, cz):
         if (cx, cz) in self.loading_chunks or (cx, cz) in self.chunks:
@@ -165,6 +170,19 @@ class World:
         if "seed" in data:
             self.seed = data["seed"]
             self.noise = OpenSimplex(self.seed)
+
+        # Restore saved player position, if present
+        self.player_position = None
+        player_pos = data.get("player_position")
+        if isinstance(player_pos, (list, tuple)) and len(player_pos) == 3:
+            try:
+                self.player_position = (
+                    float(player_pos[0]),
+                    float(player_pos[1]),
+                    float(player_pos[2]),
+                )
+            except Exception:
+                self.player_position = None
 
         # Normalize modified_blocks into internal dict[(cx,cz)] -> {(lx,y,lz): block_type}
         self.modified_blocks = {}
@@ -224,6 +242,7 @@ class World:
         # Create a compact binary representation: modified_blocks -> {(cx,cz): [[lx,y,lz,block_type], ...]}
         data = {
             "seed": self.seed,
+            "player_position": list(self.player_position) if self.player_position is not None else None,
             "modified_blocks": {},
         }
         for (cx, cz), blocks in self.modified_blocks.items():

@@ -1,9 +1,17 @@
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
-from world import World, AIR, CHUNK_SIZE
+from world import World, AIR, CHUNK_SIZE, GRASS, DIRT, STONE, WOOD, LEAVES
 from renderer import Renderer
 from inventory import Inventory
 import math
+
+HOTKEYS = {
+    "1": GRASS,
+    "2": DIRT,
+    "3": STONE,
+    "4": WOOD,
+    "5": LEAVES,
+}
 
 app = Ursina()
 window.title = "Voxel Engine"
@@ -55,11 +63,28 @@ def rebuild_at(x, z):
     renderer.rebuild_chunk(cx, cz)
 
 
+def respawn_player():
+    if not player or not world:
+        return
+    spawn = None
+    saved = getattr(world, "player_position", None)
+    if isinstance(saved, (list, tuple)) and len(saved) == 3 and saved[1] >= 0:
+        spawn = (saved[0], max(saved[1], 3), saved[2])
+    if spawn is None:
+        spawn = (0, 30, 0)
+    player.position = spawn
+
+
 def update():
     global last_player_chunk
     if not world or not renderer:
         return
+    if player.y < 0:
+        respawn_player()
     pcx, pcz = get_player_chunk()
+    if player:
+        world.player_position = (player.x, player.y, player.z)
+
     if last_player_chunk != (pcx, pcz):
         desired = world.desired_chunk_coords(pcx, pcz)
         for coord in desired:
@@ -76,20 +101,13 @@ def update():
 def input(key):
     # when menu is active, start with Enter or Space
     if not world:
-        if key == 'enter' or key == 'space':
+        if key == "enter" or key == "space":
             start_game()
         return
 
-    if key == "1":
-        inventory.select(1)
-    if key == "2":
-        inventory.select(2)
-    if key == "3":
-        inventory.select(3)
-    if key == "4":
-        inventory.select(4)
-    if key == "5":
-        inventory.select(5)
+    if key in HOTKEYS:
+        inventory.select(HOTKEYS[key])
+        return
 
     if key == "left mouse down":
         hit = voxel_raycast()
@@ -101,7 +119,7 @@ def input(key):
                 world.set_block(x, y, z, AIR)
                 rebuild_at(x, z)
 
-    if key == "right mouse down":
+    elif key == "right mouse down":
         hit = voxel_raycast()
         if hit:
             x, y, z, last = hit
@@ -117,26 +135,25 @@ def input(key):
                     inventory.remove(inventory.selected)
 
 
+def _destroy_ui(*elements):
+    for element in elements:
+        try:
+            if element:
+                destroy(element)
+        except Exception:
+            pass
+
+
 def start_game(seed=None):
     global world, renderer, inventory, player, last_player_chunk
     # remove menu UI
-    try:
-        destroy(menu_title)
-    except Exception:
-        pass
-    try:
-        destroy(start_button)
-    except Exception:
-        pass
-    try:
-        destroy(quit_button)
-    except Exception:
-        pass
+    _destroy_ui(menu_title, start_button, quit_button)
 
     world = World(seed=seed if seed is not None else 12345)
     renderer = Renderer(world)
     inventory = Inventory()
-    player = FirstPersonController(y=30, speed=6, jump_height=2, gravity=1)
+    start_pos = world.player_position if world.player_position is not None else (0, 30, 0)
+    player = FirstPersonController(position=start_pos, speed=6, jump_height=2, gravity=1)
     last_player_chunk = None
 
     for coord in world.desired_chunk_coords(0, 0):
